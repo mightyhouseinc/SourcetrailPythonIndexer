@@ -79,8 +79,17 @@ def getEnvironment(environmentPath = None):
 					return environment
 				except Exception:
 					pass
-			print('WARNING: The provided environment path "' + environmentPath + '" does not specify a functional Python '
-				'environment (details: "' + str(e) + '"). Using fallback environment instead.')
+			print(
+				(
+					(
+						f'WARNING: The provided environment path "{environmentPath}'
+						+ '" does not specify a functional Python '
+						'environment (details: "'
+					)
+					+ str(e)
+					+ '"). Using fallback environment instead.'
+				)
+			)
 
 	try:
 		environment = jedi.get_default_environment()
@@ -113,12 +122,16 @@ def isSourcetrailDBVersionCompatible(allowLogging = False):
 		usedVersion = srctrl.getVersionString()
 	except AttributeError:
 		if allowLogging:
-			print('ERROR: Used version of SourcetrailDB is incompatible to what is required by this version of SourcetrailPythonIndexer (' + requiredVersion + ').')
+			print(
+				f'ERROR: Used version of SourcetrailDB is incompatible to what is required by this version of SourcetrailPythonIndexer ({requiredVersion}).'
+			)
 		return False
 
 	if usedVersion != requiredVersion:
 		if allowLogging:
-			print('ERROR: Used version of SourcetrailDB (' + usedVersion + ') is incompatible to what is required by this version of SourcetrailPythonIndexer (' + requiredVersion + ').')
+			print(
+				f'ERROR: Used version of SourcetrailDB ({usedVersion}) is incompatible to what is required by this version of SourcetrailPythonIndexer ({requiredVersion}).'
+			)
 		return False
 	return True
 
@@ -154,7 +167,7 @@ def indexSourceCode(sourceCode, workingDirectory, astVisitorClient, isVerbose, e
 def indexSourceFile(sourceFilePath, environmentPath, workingDirectory, astVisitorClient, isVerbose):
 
 	if isVerbose:
-		print('INFO: Indexing source file "' + sourceFilePath + '".')
+		print(f'INFO: Indexing source file "{sourceFilePath}".')
 
 	sourceCode = ''
 	try:
@@ -168,7 +181,7 @@ def indexSourceFile(sourceFilePath, environmentPath, workingDirectory, astVisito
 	environment = getEnvironment(environmentPath)
 
 	if isVerbose:
-		print('INFO: Using Python environment at "' + environment.path + '" for indexing.')
+		print(f'INFO: Using Python environment at "{environment.path}" for indexing.')
 
 	project = jedi.api.project.Project(workingDirectory, environment_path = environment.path)
 
@@ -229,10 +242,10 @@ class AstVisitor:
 		self.sysPath = list(filter(None, self.sysPath))
 
 		self.contextStack = []
-		
+
 		fileId = self.client.recordFile(self.sourceFilePath)
 		if fileId == 0:
-			print('ERROR: ' + srctrl.getLastError())
+			print(f'ERROR: {srctrl.getLastError()}')
 		self.client.recordFileLanguage(fileId, 'python')
 		self.contextStack.append(ContextInfo(fileId, self.sourceFilePath, None))
 
@@ -413,13 +426,14 @@ class AstVisitor:
 						# Early exit. We don't record references for locations of classes or functions that are definitions
 						return
 
-					if definition.type == 'class':
-						if self.recordClassReference(node, definition):
-							referenceIsUnsolved = False
-
-					elif definition.type == 'function':
-						if self.recordFunctionReference(node, definition):
-							referenceIsUnsolved = False
+					if (
+						definition.type == 'class'
+						and self.recordClassReference(node, definition)
+						or definition.type != 'class'
+						and definition.type == 'function'
+						and self.recordFunctionReference(node, definition)
+					):
+						referenceIsUnsolved = False
 
 				elif definition.type == 'param':
 					if definition.line is None or definition.column is None:
@@ -437,7 +451,9 @@ class AstVisitor:
 					if self.recordStatementReference(node, definition):
 						referenceIsUnsolved = False
 			except Exception as e:
-				print('ERROR: Encountered exception "' + e.__repr__() + '" while trying to solve the definition of node "' + node.value + '" at ' + getSourceRangeOfNode(node).toString() + '.')
+				print(
+					f'ERROR: Encountered exception "{e.__repr__()}" while trying to solve the definition of node "{node.value}" at {getSourceRangeOfNode(node).toString()}.'
+				)
 
 		if referenceIsUnsolved:
 			self.client.recordReferenceToUnsolvedSymhol(self.contextStack[-1].id, srctrl.REFERENCE_USAGE, getSourceRangeOfNode(node))
@@ -464,7 +480,11 @@ class AstVisitor:
 
 
 	def beginVisitErrorLeaf(self, node):
-		self.client.recordError('Unexpected token of type "' + node.token_type + '" encountered.', False, getSourceRangeOfNode(node))
+		self.client.recordError(
+			f'Unexpected token of type "{node.token_type}" encountered.',
+			False,
+			getSourceRangeOfNode(node),
+		)
 
 
 	def endVisitErrorLeaf(self, node):
@@ -504,7 +524,11 @@ class AstVisitor:
 					return False
 		elif node.type == 'name':
 			if len(self.getDefinitionsOfNode(node, self.sourceFilePath)) == 0:
-				self.client.recordError('Imported symbol named "' + node.value + '" has not been found.', False, getSourceRangeOfNode(node))
+				self.client.recordError(
+					f'Imported symbol named "{node.value}" has not been found.',
+					False,
+					getSourceRangeOfNode(node),
+				)
 				return False
 		return True
 
@@ -661,37 +685,7 @@ class AstVisitor:
 
 		definitionNameNode = definition._name.tree_name
 		namedDefinitionParentNode = getParentWithTypeInList(definitionNameNode, ['classdef', 'funcdef'])
-		if namedDefinitionParentNode is not None:
-			if namedDefinitionParentNode.type in ['classdef']:
-				if getNamedParentNode(definitionNameNode) == namedDefinitionParentNode:
-					# definition is not local to some other field instantiation but instead it is a static member variable
-					if definitionNameNode.start_pos == node.start_pos and definitionNameNode.end_pos == node.end_pos:
-						# node is the definition of the static member variable
-						symbolKind = srctrl.SYMBOL_FIELD
-						definitionKind = srctrl.DEFINITION_EXPLICIT
-					else:
-						# node is a usage of the static member variable
-						referenceKind = srctrl.REFERENCE_USAGE
-			elif namedDefinitionParentNode.type in ['funcdef']:
-				# definition may be a non-static member variable
-				if definitionNameNode.parent is not None and definitionNameNode.parent.type == 'trailer':
-					potentialParamNode = getNamedParentNode(definitionNameNode)
-					if potentialParamNode is not None:
-						for potentialParamDefinition in self.getDefinitionsOfNode(potentialParamNode, definitionModulePath):
-							if potentialParamDefinition is not None and potentialParamDefinition.type == 'param':
-								paramDefinitionNameNode = potentialParamDefinition._name.tree_name
-								potentialFuncdefNode = getNamedParentNode(paramDefinitionNameNode)
-								if potentialFuncdefNode is not None and potentialFuncdefNode.type == 'funcdef':
-									potentialClassdefNode = getNamedParentNode(potentialFuncdefNode)
-									if potentialClassdefNode is not None and potentialClassdefNode.type == 'classdef':
-										preceedingNode = paramDefinitionNameNode.parent.get_previous_sibling()
-										if preceedingNode is not None and preceedingNode.type != 'param':
-											# 'paramDefinitionNameNode' is the first parameter of a member function (aka. 'self')
-											referenceKind = srctrl.REFERENCE_USAGE
-											if definitionNameNode.start_pos == node.start_pos and definitionNameNode.end_pos == node.end_pos:
-												symbolKind = srctrl.SYMBOL_FIELD
-												definitionKind = srctrl.DEFINITION_EXPLICIT
-		else:
+		if namedDefinitionParentNode is None:
 			symbolKind = srctrl.SYMBOL_GLOBAL_VARIABLE
 			if definitionNameNode.start_pos == node.start_pos and definitionNameNode.end_pos == node.end_pos:
 				# node is the definition of a global variable
@@ -703,32 +697,71 @@ class AstVisitor:
 			else:
 				referenceKind = srctrl.REFERENCE_USAGE
 
+		elif namedDefinitionParentNode.type in ['classdef']:
+			if getNamedParentNode(definitionNameNode) == namedDefinitionParentNode:
+				# definition is not local to some other field instantiation but instead it is a static member variable
+				if definitionNameNode.start_pos == node.start_pos and definitionNameNode.end_pos == node.end_pos:
+					# node is the definition of the static member variable
+					symbolKind = srctrl.SYMBOL_FIELD
+					definitionKind = srctrl.DEFINITION_EXPLICIT
+				else:
+					# node is a usage of the static member variable
+					referenceKind = srctrl.REFERENCE_USAGE
+		elif namedDefinitionParentNode.type in ['funcdef']:
+			# definition may be a non-static member variable
+			if definitionNameNode.parent is not None and definitionNameNode.parent.type == 'trailer':
+				potentialParamNode = getNamedParentNode(definitionNameNode)
+				if potentialParamNode is not None:
+					for potentialParamDefinition in self.getDefinitionsOfNode(potentialParamNode, definitionModulePath):
+						if potentialParamDefinition is not None and potentialParamDefinition.type == 'param':
+							paramDefinitionNameNode = potentialParamDefinition._name.tree_name
+							potentialFuncdefNode = getNamedParentNode(paramDefinitionNameNode)
+							if potentialFuncdefNode is not None and potentialFuncdefNode.type == 'funcdef':
+								potentialClassdefNode = getNamedParentNode(potentialFuncdefNode)
+								if potentialClassdefNode is not None and potentialClassdefNode.type == 'classdef':
+									preceedingNode = paramDefinitionNameNode.parent.get_previous_sibling()
+									if preceedingNode is not None and preceedingNode.type != 'param':
+										# 'paramDefinitionNameNode' is the first parameter of a member function (aka. 'self')
+										referenceKind = srctrl.REFERENCE_USAGE
+										if definitionNameNode.start_pos == node.start_pos and definitionNameNode.end_pos == node.end_pos:
+											symbolKind = srctrl.SYMBOL_FIELD
+											definitionKind = srctrl.DEFINITION_EXPLICIT
 		sourceRange = getSourceRangeOfNode(node)
 
-		if symbolKind is not None or referenceKind is not None:
+		if symbolKind is not None:
 			symbolNameHierarchy = self.getNameHierarchyOfNode(definitionNameNode, definitionModulePath)
 			if symbolNameHierarchy is None:
 				return False
 
 			symbolId = self.client.recordSymbol(symbolNameHierarchy)
 
-			if symbolKind is not None:
-				self.client.recordSymbolKind(symbolId, symbolKind)
+			self.client.recordSymbolKind(symbolId, symbolKind)
 
 			if definitionKind is not None:
 				self.client.recordSymbolDefinitionKind(symbolId, definitionKind)
 				self.client.recordSymbolLocation(symbolId, sourceRange)
 
-			if referenceKind is not None:
-				referenceId = self.client.recordReference(
-					self.contextStack[-1].id,
-					symbolId,
-					referenceKind
-				)
-				self.client.recordReferenceLocation(referenceId, sourceRange)
+		elif referenceKind is not None:
+			symbolNameHierarchy = self.getNameHierarchyOfNode(definitionNameNode, definitionModulePath)
+			if symbolNameHierarchy is None:
+				return False
+
+			symbolId = self.client.recordSymbol(symbolNameHierarchy)
+
+			if definitionKind is not None:
+				self.client.recordSymbolDefinitionKind(symbolId, definitionKind)
+				self.client.recordSymbolLocation(symbolId, sourceRange)
+
 		else:
 			localSymbolId = self.client.recordLocalSymbol(self.getLocalSymbolName(definition))
 			self.client.recordLocalSymbolLocation(localSymbolId, sourceRange)
+		if referenceKind is not None:
+			referenceId = self.client.recordReference(
+				self.contextStack[-1].id,
+				symbolId,
+				referenceKind
+			)
+			self.client.recordReferenceLocation(referenceId, sourceRange)
 		return True
 
 
@@ -753,7 +786,7 @@ class AstVisitor:
 		if len(contextName) == 0:
 			contextName = str(self.contextStack[-1].name)
 
-		return contextName + '<' + definitionNameNode.value + '>'
+		return f'{contextName}<{definitionNameNode.value}>'
 
 
 	def getNameHierarchyFromModuleFilePath(self, filePath):
@@ -772,17 +805,19 @@ class AstVisitor:
 		major = self.environment.version_info.major
 		minor = self.environment.version_info.minor
 		if major == 2:
-			sysPath.append(os.path.abspath(jediPath + '/third_party/typeshed/stdlib/2'))
-		if major == 2 or major == 3:
-			sysPath.append(os.path.abspath(jediPath + '/third_party/typeshed/stdlib/2and3'))
+			sysPath.append(os.path.abspath(f'{jediPath}/third_party/typeshed/stdlib/2'))
+		if major in [2, 3]:
+			sysPath.append(
+				os.path.abspath(f'{jediPath}/third_party/typeshed/stdlib/2and3')
+			)
 		if major == 3:
-			sysPath.append(os.path.abspath(jediPath + '/third_party/typeshed/stdlib/3'))
+			sysPath.append(os.path.abspath(f'{jediPath}/third_party/typeshed/stdlib/3'))
 			if minor == 5:
-				sysPath.append(os.path.abspath(jediPath + '/third_party/typeshed/stdlib/3.5'))
-			if minor == 6:
-				sysPath.append(os.path.abspath(jediPath + '/third_party/typeshed/stdlib/3.6'))
-			if minor == 7:
-				sysPath.append(os.path.abspath(jediPath + '/third_party/typeshed/stdlib/3.7'))
+				sysPath.append(os.path.abspath(f'{jediPath}/third_party/typeshed/stdlib/3.5'))
+			elif minor == 6:
+				sysPath.append(os.path.abspath(f'{jediPath}/third_party/typeshed/stdlib/3.6'))
+			elif minor == 7:
+				sysPath.append(os.path.abspath(f'{jediPath}/third_party/typeshed/stdlib/3.7'))
 
 		sysPath.extend(self.sysPath)
 
@@ -838,18 +873,17 @@ class AstVisitor:
 			return None
 
 		if definition.line is None and definition.column is None:
-			if definition.module_name in ['builtins', '__builtin__']:
-				nameHierarchy = NameHierarchy(NameElement('builtins'), '.')
-				if definition.full_name is not None:
-					for namePart in definition.full_name.split('.'):
-						nameHierarchy.nameElements.append(NameElement(namePart))
-				else:
-					for namePart in definition.name.split('.'):
-						nameHierarchy.nameElements.append(NameElement(namePart))
-				return nameHierarchy
-			else:
+			if definition.module_name not in ['builtins', '__builtin__']:
 				return self.getNameHierarchyFromFullNameOfDefinition(definition)
 
+			nameHierarchy = NameHierarchy(NameElement('builtins'), '.')
+			if definition.full_name is not None:
+				for namePart in definition.full_name.split('.'):
+					nameHierarchy.nameElements.append(NameElement(namePart))
+			else:
+				for namePart in definition.name.split('.'):
+					nameHierarchy.nameElements.append(NameElement(namePart))
+			return nameHierarchy
 		else:
 			if definition._name is None or definition._name.tree_name is None:
 				return None
@@ -971,18 +1005,17 @@ class VerboseAstVisitor(AstVisitor):
 
 
 	def traverseNode(self, node):
-		currentString = ''
-		for i in range(0, self.indentationLevel):
-			currentString += self.indentationToken
-
+		currentString = ''.join(
+			self.indentationToken for _ in range(0, self.indentationLevel)
+		)
 		currentString += node.type
 
 		if hasattr(node, 'value'):
-			currentString += ' (' + repr(node.value) + ')'
+			currentString += f' ({repr(node.value)})'
 
-		currentString += ' ' + getSourceRangeOfNode(node).toString()
+		currentString += f' {getSourceRangeOfNode(node).toString()}'
 
-		print('AST: ' + currentString)
+		print(f'AST: {currentString}')
 
 		self.indentationLevel += 1
 		AstVisitor.traverseNode(self, node)
@@ -997,14 +1030,15 @@ class AstVisitorClient:
 			print('INFO: Loaded database is compatible.')
 		else:
 			print('WARNING: Loaded database is not compatible.')
-			print('INFO: Supported DB Version: ' + str(srctrl.getSupportedDatabaseVersion()))
-			print('INFO: Loaded DB Version: ' + str(srctrl.getLoadedDatabaseVersion()))
+			print(
+				f'INFO: Supported DB Version: {str(srctrl.getSupportedDatabaseVersion())}'
+			)
+			print(f'INFO: Loaded DB Version: {str(srctrl.getLoadedDatabaseVersion())}')
 
 
 	def recordSymbol(self, nameHierarchy):
 		if nameHierarchy is not None:
-			symbolId = srctrl.recordSymbol(nameHierarchy.serialize())
-			return symbolId
+			return srctrl.recordSymbol(nameHierarchy.serialize())
 		return 0
 
 
@@ -1152,7 +1186,7 @@ class SourceRange:
 
 
 	def toString(self):
-		return '[' + str(self.startLine) + ':' + str(self.startColumn) + '|' + str(self.endLine) + ':' + str(self.endColumn) + ']'
+		return f'[{str(self.startLine)}:{str(self.startColumn)}|{str(self.endLine)}:{str(self.endColumn)}]'
 
 
 class NameHierarchy():
@@ -1184,7 +1218,7 @@ class NameHierarchy():
 				displayString += self.delimiter
 			isFirst = False
 			if len(nameElement.prefix) > 0:
-				displayString += nameElement.prefix + ' '
+				displayString += f'{nameElement.prefix} '
 			displayString += nameElement.name
 			if len(nameElement.postfix) > 0:
 				displayString += nameElement.postfix
@@ -1219,9 +1253,11 @@ def isQualifierNode(node):
 	nextNode = getNext(node)
 	if nextNode is not None and nextNode.type == 'trailer':
 		nextNode = getNext(nextNode)
-	if nextNode is not None and nextNode.type == 'operator' and nextNode.value == '.':
-		return True
-	return False
+	return (
+		nextNode is not None
+		and nextNode.type == 'operator'
+		and nextNode.value == '.'
+	)
 
 
 def isCallNode(node):
@@ -1256,10 +1292,10 @@ def getNamedParentNode(node):
 
 
 def getParentWithType(node, type):
-	if node == None:
+	if node is None:
 		return None
 	parentNode = node.parent
-	if parentNode == None:
+	if parentNode is None:
 		return None
 	if parentNode.type == type:
 		return parentNode
@@ -1267,10 +1303,10 @@ def getParentWithType(node, type):
 
 
 def getParentWithTypeInList(node, typeList):
-	if node == None:
+	if node is None:
 		return None
 	parentNode = node.parent
-	if parentNode == None:
+	if parentNode is None:
 		return None
 	if parentNode.type in typeList:
 		return parentNode
@@ -1278,18 +1314,11 @@ def getParentWithTypeInList(node, typeList):
 
 
 def getFirstDirectChildWithType(node, type):
-	for c in node.children:
-		if c.type == type:
-			return c
-	return None
+	return next((c for c in node.children if c.type == type), None)
 
 
 def getDirectChildrenWithType(node, type):
-	children = []
-	for c in node.children:
-		if c.type == type:
-			children.append(c)
-	return children
+	return [c for c in node.children if c.type == type]
 
 
 def getNext(node):

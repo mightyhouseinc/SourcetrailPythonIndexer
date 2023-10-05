@@ -824,9 +824,7 @@ class TestAstVisitorClient():
 			if 'signature_location' in self.symbolIdsToData[key]:
 				symbolString += ' with signature ' + self.symbolIdsToData[key]['signature_location']
 
-			symbolString = symbolString.strip()
-
-			if symbolString:
+			if symbolString := symbolString.strip():
 				self.symbols.append(symbolString)
 
 		self.localSymbols = []
@@ -837,9 +835,10 @@ class TestAstVisitorClient():
 				localSymbolString += self.localSymbolIdsToData[key]['name']
 
 			if localSymbolString and 'local_symbol_locations' in self.localSymbolIdsToData[key]:
-				for location in self.localSymbolIdsToData[key]['local_symbol_locations']:
-					self.localSymbols.append(localSymbolString + ' at ' + location)
-
+				self.localSymbols.extend(
+					f'{localSymbolString} at {location}'
+					for location in self.localSymbolIdsToData[key]['local_symbol_locations']
+				)
 		self.references = []
 		for key in self.referenceIdsToData:
 			if 'reference_location' not in self.referenceIdsToData[key] or len(self.referenceIdsToData[key]['reference_location']) == 0:
@@ -866,11 +865,9 @@ class TestAstVisitorClient():
 					referenceString += 'UNKNOWN SYMBOL'
 
 				if referenceLocation:
-					referenceString += ' at ' + referenceLocation
+					referenceString += f' at {referenceLocation}'
 
-				referenceString = referenceString.strip()
-
-				if referenceString:
+				if referenceString := referenceString.strip():
 					self.references.append(referenceString)
 
 		self.qualifiers = []
@@ -883,7 +880,7 @@ class TestAstVisitorClient():
 				qualifierString = symbolName
 
 				if qualifierLocation:
-					qualifierString += ' at ' + qualifierLocation
+					qualifierString += f' at {qualifierLocation}'
 
 				if qualifierString:
 					self.qualifiers.append(qualifierString)
@@ -936,7 +933,7 @@ class TestAstVisitorClient():
 
 
 	def recordReference(self, contextSymbolId, referencedSymbolId, referenceKind):
-		serialized = str(contextSymbolId) + ' -> ' + str(referencedSymbolId) + '[' + str(referenceKind) + ']'
+		serialized = f'{str(contextSymbolId)} -> {str(referencedSymbolId)}[{str(referenceKind)}]'
 		if serialized in self.serializedReferencesToIds:
 			return self.serializedReferencesToIds[serialized]
 
@@ -1019,7 +1016,9 @@ class TestAstVisitorClient():
 
 
 	def recordAtomicSourceRange(self, sourceRange):
-		self.atomicSourceRanges.append('ATOMIC SOURCE RANGE: ' + sourceRange.toString())
+		self.atomicSourceRanges.append(
+			f'ATOMIC SOURCE RANGE: {sourceRange.toString()}'
+		)
 		return
 
 
@@ -1027,7 +1026,7 @@ class TestAstVisitorClient():
 		errorString = ''
 		if fatal:
 			errorString += 'FATAL '
-		errorString += 'ERROR: "' + message + '" at ' + sourceRange.toString()
+		errorString += f'ERROR: "{message}" at {sourceRange.toString()}'
 		self.errors.append(errorString)
 		return
 
@@ -1035,9 +1034,7 @@ class TestAstVisitorClient():
 def symbolDefinitionKindToString(symbolDefinitionKind):
 	if symbolDefinitionKind == srctrl.SYMBOL_ANNOTATION:
 		return 'EXPLICIT'
-	if symbolDefinitionKind == srctrl.DEFINITION_IMPLICIT:
-		return 'IMPLICIT'
-	return ''
+	return 'IMPLICIT' if symbolDefinitionKind == srctrl.DEFINITION_IMPLICIT else ''
 
 def symbolKindToString(symbolKind):
 	if symbolKind == srctrl.SYMBOL_TYPE:
@@ -1078,9 +1075,7 @@ def symbolKindToString(symbolKind):
 		return 'FILE'
 	if symbolKind == srctrl.SYMBOL_MACRO:
 		return 'MACRO'
-	if symbolKind == srctrl.SYMBOL_UNION:
-		return 'UNION'
-	return ''
+	return 'UNION' if symbolKind == srctrl.SYMBOL_UNION else ''
 
 
 def referenceKindToString(referenceKind):

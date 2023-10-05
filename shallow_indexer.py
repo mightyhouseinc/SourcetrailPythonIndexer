@@ -25,12 +25,16 @@ def isSourcetrailDBVersionCompatible(allowLogging = False):
 		usedVersion = srctrl.getVersionString()
 	except AttributeError:
 		if allowLogging:
-			print('ERROR: Used version of SourcetrailDB is incompatible to what is required by this version of SourcetrailPythonIndexer (' + requiredVersion + ').')
+			print(
+				f'ERROR: Used version of SourcetrailDB is incompatible to what is required by this version of SourcetrailPythonIndexer ({requiredVersion}).'
+			)
 		return False
 
 	if usedVersion != requiredVersion:
 		if allowLogging:
-			print('ERROR: Used version of SourcetrailDB (' + usedVersion + ') is incompatible to what is required by this version of SourcetrailPythonIndexer (' + requiredVersion + ').')
+			print(
+				f'ERROR: Used version of SourcetrailDB ({usedVersion}) is incompatible to what is required by this version of SourcetrailPythonIndexer ({requiredVersion}).'
+			)
 		return False
 	return True
 
@@ -51,7 +55,7 @@ def indexSourceCode(sourceCode, workingDirectory, astVisitorClient, isVerbose, s
 def indexSourceFile(sourceFilePath, environmentDirectoryPath, workingDirectory, astVisitorClient, isVerbose):
 
 	if isVerbose:
-		print('INFO: Indexing source file "' + sourceFilePath + '".')
+		print(f'INFO: Indexing source file "{sourceFilePath}".')
 
 	sourceCode = ''
 	with open(sourceFilePath, 'r', encoding='utf-8') as input:
@@ -121,7 +125,7 @@ class AstVisitor:
 
 		fileId = self.client.recordFile(self.sourceFilePath)
 		if fileId == 0:
-			print('ERROR: ' + srctrl.getLastError())
+			print(f'ERROR: {srctrl.getLastError()}')
 		self.client.recordFileLanguage(fileId, 'python')
 		self.contextStack.append(ContextInfo(fileId, ContextType.FILE, self.sourceFilePath, None))
 
@@ -220,13 +224,15 @@ class AstVisitor:
 		if node is None:
 			return
 
-		childTraverseStartIndex = 0
-
-		for i in range(len(node.children)):
-			if node.children[i].type == 'operator' and node.children[i].value == '=':
-				childTraverseStartIndex = i + 1
-				break
-
+		childTraverseStartIndex = next(
+			(
+				i + 1
+				for i in range(len(node.children))
+				if node.children[i].type == 'operator'
+				and node.children[i].value == '='
+			),
+			0,
+		)
 		for i in range(childTraverseStartIndex, len(node.children)):
 			self.traverseNode(node.children[i])
 
@@ -381,45 +387,7 @@ class AstVisitor:
 
 		if node.is_definition():
 			namedDefinitionParentNode = getParentWithTypeInList(node, ['classdef', 'funcdef'])
-			if namedDefinitionParentNode is not None:
-				if namedDefinitionParentNode.type in ['classdef']:
-					if getNamedParentNode(node) == namedDefinitionParentNode:
-						# definition is not local to some other field instantiation but instead it is a static member variable
-						# node is the definition of the static member variable
-						symbolNameHierarchy = self.getNameHierarchyOfNode(node)
-						if symbolNameHierarchy is not None:
-							symbolId = self.client.recordSymbol(symbolNameHierarchy)
-							self.client.recordSymbolKind(symbolId, srctrl.SYMBOL_FIELD)
-							self.client.recordSymbolDefinitionKind(symbolId, srctrl.DEFINITION_EXPLICIT)
-							self.client.recordSymbolLocation(symbolId, getSourceRangeOfNode(node))
-							return
-				elif namedDefinitionParentNode.type in ['funcdef']:
-					# definition may be a non-static member variable
-					if node.parent is not None and node.parent.type == 'trailer' and node.get_previous_sibling() is not None and node.get_previous_sibling().value == '.':
-						potentialSelfParamNode = getNamedParentNode(node)
-						if potentialSelfParamNode is not None and getFirstDirectChildWithType(potentialSelfParamNode, 'name').value == self.contextStack[-1].selfParamName:
-							# definition is a non-static member variable
-							symbolNameHierarchy = self.getNameHierarchyOfNode(node)
-							if symbolNameHierarchy is not None:
-								sourceRange = getSourceRangeOfNode(node)
-
-								symbolId = self.client.recordSymbol(symbolNameHierarchy)
-								self.client.recordSymbolKind(symbolId, srctrl.SYMBOL_FIELD)
-								self.client.recordSymbolDefinitionKind(symbolId, srctrl.DEFINITION_EXPLICIT)
-								self.client.recordSymbolLocation(symbolId, sourceRange)
-
-								referenceId = self.client.recordReference(self.contextStack[-1].id, symbolId, referenceKind)
-								self.client.recordReferenceLocation(referenceId, sourceRange)
-								return
-						else:
-							# despite "node.is_definition()" says so, this is just a re-definition of an other class' member
-							self.client.recordReferenceToUnsolvedSymhol(self.contextStack[-1].id, referenceKind, getSourceRangeOfNode(node))
-							return
-					localSymbolId = self.client.recordLocalSymbol(self.getLocalSymbolName(node))
-					self.client.recordLocalSymbolLocation(localSymbolId, getSourceRangeOfNode(node))
-					self.contextStack[-1].localSymbolNames.append(node.value)
-					return
-			else:
+			if namedDefinitionParentNode is None:
 				symbolNameHierarchy = self.getNameHierarchyOfNode(node)
 				if symbolNameHierarchy is not None:
 					symbolId = self.client.recordSymbol(symbolNameHierarchy)
@@ -427,12 +395,50 @@ class AstVisitor:
 					self.client.recordSymbolDefinitionKind(symbolId, srctrl.DEFINITION_EXPLICIT)
 					self.client.recordSymbolLocation(symbolId, getSourceRangeOfNode(node))
 					return
+			elif namedDefinitionParentNode.type in ['classdef']:
+				if getNamedParentNode(node) == namedDefinitionParentNode:
+					# definition is not local to some other field instantiation but instead it is a static member variable
+					# node is the definition of the static member variable
+					symbolNameHierarchy = self.getNameHierarchyOfNode(node)
+					if symbolNameHierarchy is not None:
+						symbolId = self.client.recordSymbol(symbolNameHierarchy)
+						self.client.recordSymbolKind(symbolId, srctrl.SYMBOL_FIELD)
+						self.client.recordSymbolDefinitionKind(symbolId, srctrl.DEFINITION_EXPLICIT)
+						self.client.recordSymbolLocation(symbolId, getSourceRangeOfNode(node))
+						return
+			elif namedDefinitionParentNode.type in ['funcdef']:
+				# definition may be a non-static member variable
+				if node.parent is not None and node.parent.type == 'trailer' and node.get_previous_sibling() is not None and node.get_previous_sibling().value == '.':
+					potentialSelfParamNode = getNamedParentNode(node)
+					if potentialSelfParamNode is not None and getFirstDirectChildWithType(potentialSelfParamNode, 'name').value == self.contextStack[-1].selfParamName:
+						# definition is a non-static member variable
+						symbolNameHierarchy = self.getNameHierarchyOfNode(node)
+						if symbolNameHierarchy is not None:
+							sourceRange = getSourceRangeOfNode(node)
+
+							symbolId = self.client.recordSymbol(symbolNameHierarchy)
+							self.client.recordSymbolKind(symbolId, srctrl.SYMBOL_FIELD)
+							self.client.recordSymbolDefinitionKind(symbolId, srctrl.DEFINITION_EXPLICIT)
+							self.client.recordSymbolLocation(symbolId, sourceRange)
+
+							referenceId = self.client.recordReference(self.contextStack[-1].id, symbolId, referenceKind)
+							self.client.recordReferenceLocation(referenceId, sourceRange)
+							return
+					else:
+						# despite "node.is_definition()" says so, this is just a re-definition of an other class' member
+						self.client.recordReferenceToUnsolvedSymhol(self.contextStack[-1].id, referenceKind, getSourceRangeOfNode(node))
+						return
+				localSymbolId = self.client.recordLocalSymbol(self.getLocalSymbolName(node))
+				self.client.recordLocalSymbolLocation(localSymbolId, getSourceRangeOfNode(node))
+				self.contextStack[-1].localSymbolNames.append(node.value)
+				return
 		else: # if not node.is_definition():
-			recordLocalSymbolUsage = True
-
-			if node.parent is not None and node.parent.type == 'trailer' and node.get_previous_sibling() is not None and node.get_previous_sibling().value == '.':
-				recordLocalSymbolUsage = False
-
+			recordLocalSymbolUsage = (
+				node.parent is None
+				or node.parent.type != 'trailer'
+				or node.get_previous_sibling() is None
+				or node.get_previous_sibling().value != '.'
+			)
 			if recordLocalSymbolUsage:
 				if node.value in self.contextStack[-1].localSymbolNames:
 					localSymbolId = self.client.recordLocalSymbol(self.getLocalSymbolName(node))
@@ -464,7 +470,11 @@ class AstVisitor:
 
 
 	def beginVisitErrorLeaf(self, node):
-		self.client.recordError('Unexpected token of type "' + node.token_type + '" encountered.', False, getSourceRangeOfNode(node))
+		self.client.recordError(
+			f'Unexpected token of type "{node.token_type}" encountered.',
+			False,
+			getSourceRangeOfNode(node),
+		)
 
 
 	def endVisitErrorLeaf(self, node):
@@ -488,7 +498,7 @@ class AstVisitor:
 #----------------
 
 	def getLocalSymbolName(self, nameNode):
-		return str(self.contextStack[-1].name) + '<' + nameNode.value + '>'
+		return f'{str(self.contextStack[-1].name)}<{nameNode.value}>'
 
 
 	def getNameHierarchyFromModuleFilePath(self, filePath):
@@ -567,8 +577,6 @@ class AstVisitor:
 		nameHierarchy.nameElements.append(nameElement)
 		return nameHierarchy
 
-		return None
-
 
 class VerboseAstVisitor(AstVisitor):
 
@@ -582,18 +590,17 @@ class VerboseAstVisitor(AstVisitor):
 		if node is None:
 			return
 
-		currentString = ''
-		for i in range(0, self.indentationLevel):
-			currentString += self.indentationToken
-
+		currentString = ''.join(
+			self.indentationToken for _ in range(0, self.indentationLevel)
+		)
 		currentString += node.type
 
 		if hasattr(node, 'value'):
-			currentString += ' (' + repr(node.value) + ')'
+			currentString += f' ({repr(node.value)})'
 
-		currentString += ' ' + getSourceRangeOfNode(node).toString()
+		currentString += f' {getSourceRangeOfNode(node).toString()}'
 
-		print('AST: ' + currentString)
+		print(f'AST: {currentString}')
 
 		self.indentationLevel += 1
 		AstVisitor.traverseNode(self, node)
@@ -608,9 +615,11 @@ def isQualifierNode(node):
 	nextNode = getNext(node)
 	if nextNode is not None and nextNode.type == 'trailer':
 		nextNode = getNext(nextNode)
-	if nextNode is not None and nextNode.type == 'operator' and nextNode.value == '.':
-		return True
-	return False
+	return (
+		nextNode is not None
+		and nextNode.type == 'operator'
+		and nextNode.value == '.'
+	)
 
 
 def getSourceRangeOfNode(node):
@@ -637,10 +646,10 @@ def getNamedParentNode(node):
 
 
 def getParentWithType(node, type):
-	if node == None:
+	if node is None:
 		return None
 	parentNode = node.parent
-	if parentNode == None:
+	if parentNode is None:
 		return None
 	if parentNode.type == type:
 		return parentNode
@@ -648,10 +657,10 @@ def getParentWithType(node, type):
 
 
 def getParentWithTypeInList(node, typeList):
-	if node == None:
+	if node is None:
 		return None
 	parentNode = node.parent
-	if parentNode == None:
+	if parentNode is None:
 		return None
 	if parentNode.type in typeList:
 		return parentNode
@@ -659,18 +668,11 @@ def getParentWithTypeInList(node, typeList):
 
 
 def getFirstDirectChildWithType(node, type):
-	for c in node.children:
-		if c.type == type:
-			return c
-	return None
+	return next((c for c in node.children if c.type == type), None)
 
 
 def getDirectChildrenWithType(node, type):
-	children = []
-	for c in node.children:
-		if c.type == type:
-			children.append(c)
-	return children
+	return [c for c in node.children if c.type == type]
 
 
 def getNext(node):

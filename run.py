@@ -14,7 +14,7 @@ def main():
 	indexCommandName = 'index'
 	parserIndex = subparsers.add_parser(
 		indexCommandName,
-		help='Index a Python source file and store the indexed data to a Sourcetrail database file. Run "' + indexCommandName + ' -h" for more info on available arguments.'
+		help=f'Index a Python source file and store the indexed data to a Sourcetrail database file. Run "{indexCommandName} -h" for more info on available arguments.',
 	)
 	parserIndex.add_argument('--source-file-path', help='path to the source file to index', type=str, required=True)
 	parserIndex.add_argument('--database-file-path', help='path to the generated Sourcetrail database file', type=str, required=True)
@@ -73,16 +73,15 @@ def processIndexCommand(args):
 		environmentPath = os.path.join(workingDirectory, environmentPath)
 
 	if not srctrl.open(databaseFilePath):
-		print('ERROR: ' + srctrl.getLastError())
+		print(f'ERROR: {srctrl.getLastError()}')
 
 	if args.clear:
 		if args.verbose:
 			print('INFO: Clearing database...')
 		if not srctrl.clear():
-			print('ERROR: ' + srctrl.getLastError())
-		else:
-			if args.verbose:
-				print('INFO: Clearing done.')
+			print(f'ERROR: {srctrl.getLastError()}')
+		elif args.verbose:
+			print('INFO: Clearing done.')
 
 	if args.verbose:
 		if srctrl.isEmpty():
@@ -95,7 +94,7 @@ def processIndexCommand(args):
 	srctrl.commitTransaction()
 
 	if not srctrl.close():
-		print('ERROR: ' + srctrl.getLastError())
+		print(f'ERROR: {srctrl.getLastError()}')
 
 
 def processCheckEnvironmentCommand(args):
@@ -105,11 +104,10 @@ def processCheckEnvironmentCommand(args):
 	if environmentPath is not None and not os.path.isabs(environmentPath):
 		environmentPath = os.path.join(workingDirectory, environmentPath)
 
-	message = indexer.isValidEnvironment(environmentPath)
-	if not message:
-		print('The provided path is a valid Python environment.')
+	if message := indexer.isValidEnvironment(environmentPath):
+		print(f'The provided path is not a valid Python environment: {message}')
 	else:
-		print('The provided path is not a valid Python environment: ' + message)
+		print('The provided path is a valid Python environment.')
 
 
 def indexSourceFile(sourceFilePath, environmentPath, workingDirectory, verbose, shallow):
